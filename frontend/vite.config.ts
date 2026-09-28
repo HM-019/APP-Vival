@@ -16,8 +16,8 @@ export default defineConfig({
         theme_color: '#0B0D14',
         background_color: '#0B0D14',
         display: 'standalone',
-        scope: '/',
-        start_url: '/',
+        scope: '/APP-Vival/',
+        start_url: '/APP-Vival/',
         icons: [
           {
             src: '/pwa-192x192.png',
