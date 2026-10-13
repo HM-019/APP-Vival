@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, ScanLine, AlertCircle } from 'lucide-react'
 import { useT } from '../i18n'
+import type { IScannerControls } from '@zxing/browser'
 
 interface Props {
   onScan: (code: string) => void
@@ -26,6 +27,7 @@ export default function CameraScanner({ onScan, onClose }: Props) {
   const rafRef = useRef<number>(0)
   const calledRef = useRef(false)
   const detectorRef = useRef<BarcodeDet | null>(null)
+  const zxingControlsRef = useRef<IScannerControls | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const [status, setStatus] = useState<'loading' | 'scanning' | 'no_support' | 'no_camera' | 'error'>('loading')
   const [torch, setTorch] = useState(false)
@@ -33,46 +35,76 @@ export default function CameraScanner({ onScan, onClose }: Props) {
   const handleResult = (code: string) => {
     if (calledRef.current) return
     calledRef.current = true
-    // Vibrate on success
     navigator.vibrate?.(100)
     onScan(code)
   }
 
   useEffect(() => {
-    if (!window.BarcodeDetector) {
-      setStatus('no_support')
-      return
+    let cancelled = false
+
+    const startNative = () => {
+      detectorRef.current = new window.BarcodeDetector!({ formats: FORMATS })
+      navigator.mediaDevices
+        .getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } } })
+        .then((stream) => {
+          if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
+          streamRef.current = stream
+          const video = videoRef.current
+          if (!video) return
+          video.srcObject = stream
+          video.play()
+          setStatus('scanning')
+
+          const scan = async () => {
+            if (calledRef.current || cancelled) return
+            if (video.readyState >= 2) {
+              try {
+                const codes = await detectorRef.current!.detect(video)
+                if (codes.length > 0) { handleResult(codes[0].rawValue); return }
+              } catch {}
+            }
+            rafRef.current = requestAnimationFrame(scan)
+          }
+          rafRef.current = requestAnimationFrame(scan)
+        })
+        .catch(() => setStatus('no_camera'))
     }
 
-    detectorRef.current = new window.BarcodeDetector({ formats: FORMATS })
-
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } } })
-      .then((stream) => {
+    const startZxing = async () => {
+      try {
+        const { BrowserMultiFormatReader } = await import('@zxing/browser')
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } },
+        })
+        if (cancelled) { stream.getTracks().forEach(t => t.stop()); return }
         streamRef.current = stream
         const video = videoRef.current
         if (!video) return
         video.srcObject = stream
-        video.play()
+        await video.play()
         setStatus('scanning')
 
-        const scan = async () => {
-          if (calledRef.current) return
-          if (video.readyState >= 2) {
-            try {
-              const codes = await detectorRef.current!.detect(video)
-              if (codes.length > 0) { handleResult(codes[0].rawValue); return }
-            } catch {}
-          }
-          rafRef.current = requestAnimationFrame(scan)
-        }
-        rafRef.current = requestAnimationFrame(scan)
-      })
-      .catch(() => setStatus('no_camera'))
+        const reader = new BrowserMultiFormatReader()
+        const controls = await reader.decodeFromStream(stream, video, (result) => {
+          if (result && !calledRef.current) handleResult(result.getText())
+        })
+        zxingControlsRef.current = controls
+      } catch {
+        setStatus('no_camera')
+      }
+    }
+
+    if (window.BarcodeDetector) {
+      startNative()
+    } else {
+      startZxing()
+    }
 
     return () => {
+      cancelled = true
       calledRef.current = true
       cancelAnimationFrame(rafRef.current)
+      zxingControlsRef.current?.stop()
       streamRef.current?.getTracks().forEach((t) => t.stop())
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -91,22 +123,43 @@ export default function CameraScanner({ onScan, onClose }: Props) {
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    if (!window.BarcodeDetector) { setStatus('no_support'); return }
-    if (!detectorRef.current) {
-      detectorRef.current = new window.BarcodeDetector({ formats: FORMATS })
-    }
+
     const img = new Image()
     const url = URL.createObjectURL(file)
     img.src = url
-    img.onload = async () => {
-      try {
-        const codes = await detectorRef.current!.detect(img)
-        if (codes.length > 0) handleResult(codes[0].rawValue)
-        else setStatus('error')
-      } catch {
-        setStatus('error')
-      } finally {
-        URL.revokeObjectURL(url)
+
+    if (window.BarcodeDetector) {
+      if (!detectorRef.current) {
+        detectorRef.current = new window.BarcodeDetector({ formats: FORMATS })
+      }
+      img.onload = async () => {
+        try {
+          const codes = await detectorRef.current!.detect(img)
+          if (codes.length > 0) handleResult(codes[0].rawValue)
+          else setStatus('error')
+        } catch {
+          setStatus('error')
+        } finally {
+          URL.revokeObjectURL(url)
+        }
+      }
+    } else {
+      // ZXing fallback for image files (iOS)
+      img.onload = async () => {
+        try {
+          const { BrowserMultiFormatReader } = await import('@zxing/browser')
+          const reader = new BrowserMultiFormatReader()
+          const canvas = document.createElement('canvas')
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          canvas.getContext('2d')!.drawImage(img, 0, 0)
+          const result = await reader.decodeFromCanvas(canvas)
+          handleResult(result.getText())
+        } catch {
+          setStatus('error')
+        } finally {
+          URL.revokeObjectURL(url)
+        }
       }
     }
   }
@@ -173,22 +226,19 @@ export default function CameraScanner({ onScan, onClose }: Props) {
         className={`absolute inset-0 w-full h-full object-cover ${status === 'scanning' ? '' : 'hidden'}`}
         playsInline
         muted
+        autoPlay
       />
 
       {/* Scan frame overlay */}
       {status === 'scanning' && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           <div className="relative w-72 h-44">
-            {/* Dimmed corners */}
             <div className="absolute inset-0 rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]" />
-            {/* Border */}
             <div className="absolute inset-0 rounded-2xl border-2 border-brand-400" />
-            {/* Corner markers */}
             <span className="absolute top-0 left-0 w-5 h-5 border-t-[3px] border-l-[3px] border-brand-400 rounded-tl-xl" />
             <span className="absolute top-0 right-0 w-5 h-5 border-t-[3px] border-r-[3px] border-brand-400 rounded-tr-xl" />
             <span className="absolute bottom-0 left-0 w-5 h-5 border-b-[3px] border-l-[3px] border-brand-400 rounded-bl-xl" />
             <span className="absolute bottom-0 right-0 w-5 h-5 border-b-[3px] border-r-[3px] border-brand-400 rounded-br-xl" />
-            {/* Animated scan line */}
             <div className="absolute inset-x-3 h-px bg-brand-400/90 top-1/2 shadow-[0_0_6px_2px_rgba(99,102,241,0.6)] animate-pulse" />
           </div>
         </div>

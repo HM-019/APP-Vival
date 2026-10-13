@@ -288,6 +288,8 @@ const en: Record<TranslationKeys, string> = {
   'global.out_of_stock': 'Out of stock',
   'global.low_stock': 'low stock',
   'global.in_stock': 'in stock',
+
+  'stock.off_source': 'Found via OpenFoodFacts',
 }
 
 export default en

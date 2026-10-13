@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Package, Plus, Search, Edit2, Trash2, ScanLine, ChevronDown, ChevronUp, ArrowLeft, Camera } from 'lucide-react'
-import { productsApi, stockApi } from '../services/api'
+import { productsApi, stockApi, openFoodFactsApi } from '../services/api'
 import { Product, Lot } from '../types'
 import Modal from '../components/ui/Modal'
 import CameraScanner from '../components/CameraScanner'
@@ -219,6 +219,7 @@ function ReceptionModal({ initialProduct, onClose }: { initialProduct: Product |
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState('')
   const [showCamera, setShowCamera] = useState(false)
+  const [fromOff, setFromOff] = useState(false)
   const [editPrice, setEditPrice] = useState(false)
   const [newSellPrice, setNewSellPrice] = useState('')
   const [formReady, setFormReady] = useState(false)
@@ -261,14 +262,31 @@ function ReceptionModal({ initialProduct, onClose }: { initialProduct: Product |
     if (!bc.trim()) return
     setScanning(true)
     setError('')
-    // Blur active element to clear any pending keyboard input from the scanner
     ;(document.activeElement as HTMLElement)?.blur()
     try {
       const { data } = await productsApi.scan(bc.trim())
+      setFromOff(false)
       setProduct(data)
       reset()
     } catch {
-      setError(t('stock.not_found'))
+      // Fallback OpenFoodFacts
+      try {
+        const off = await openFoodFactsApi.lookup(bc.trim())
+        const name = (off.product_name_fr || off.product_name || '').trim()
+        if (!name) throw new Error('no name')
+        const { data } = await productsApi.create({
+          barcode: bc.trim(),
+          name,
+          brand: off.brands ? off.brands.split(',')[0].trim() : undefined,
+          unit: off.quantity,
+          image_url: off.image_front_url,
+        })
+        setFromOff(true)
+        setProduct(data)
+        reset()
+      } catch {
+        setError(t('stock.not_found'))
+      }
     } finally {
       setScanning(false)
     }
@@ -328,7 +346,7 @@ function ReceptionModal({ initialProduct, onClose }: { initialProduct: Product |
           {/* Product card */}
           <div className="flex items-center gap-3 p-3 rounded-xl bg-bg-elevated border border-bg-border">
             {!initialProduct && (
-              <button onClick={() => { setProduct(null); setBarcode('') }} className="btn-ghost p-1.5 shrink-0">
+              <button onClick={() => { setProduct(null); setBarcode(''); setFromOff(false) }} className="btn-ghost p-1.5 shrink-0">
                 <ArrowLeft size={16} />
               </button>
             )}
@@ -344,6 +362,11 @@ function ReceptionModal({ initialProduct, onClose }: { initialProduct: Product |
               {product.brand && <p className="text-text-muted text-xs mt-0.5">{product.brand}</p>}
               {product.unit && <p className="text-text-muted text-xs">{product.unit}</p>}
               <p className="text-text-muted font-mono text-xs mt-0.5 opacity-60">{product.barcode}</p>
+              {fromOff && (
+                <span className="mt-1 inline-block text-[10px] font-medium text-brand-400 bg-brand-400/10 px-1.5 py-0.5 rounded-full">
+                  {t('stock.off_source')}
+                </span>
+              )}
             </div>
           </div>
 
@@ -507,6 +530,7 @@ export default function StockView() {
   const [showAddProduct, setShowAddProduct] = useState(false)
   const [qtyProduct, setQtyProduct] = useState<Product | null>(null)
   const [showCamera, setShowCamera] = useState(false)
+  const [showProductCamera, setShowProductCamera] = useState(false)
   const qc = useQueryClient()
   const [searchParams] = useSearchParams()
 
@@ -651,6 +675,17 @@ export default function StockView() {
       {/* Qty edit modal */}
       {qtyProduct && <QtyModal product={qtyProduct} onClose={() => setQtyProduct(null)} />}
 
+      {/* Camera scan for new product barcode */}
+      {showProductCamera && (
+        <CameraScanner
+          onScan={(code) => {
+            productForm.setValue('barcode', code, { shouldValidate: true })
+            setShowProductCamera(false)
+          }}
+          onClose={() => setShowProductCamera(false)}
+        />
+      )}
+
       {/* Add / Edit product modal */}
       <Modal
         open={showAddProduct || !!editProduct}
@@ -664,7 +699,14 @@ export default function StockView() {
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2">
               <label className="label">{t('common.barcode')} *</label>
-              <input type="text" {...productForm.register('barcode', { required: true })} className="input font-mono" placeholder="3017620422003" disabled={!!editProduct} />
+              <div className="flex gap-2">
+                <input type="text" {...productForm.register('barcode', { required: true })} className="input font-mono flex-1" placeholder="3017620422003" disabled={!!editProduct} />
+                {!editProduct && (
+                  <button type="button" onClick={() => setShowProductCamera(true)} className="btn-secondary px-3 shrink-0" title={t('stock.camera_title')}>
+                    <Camera size={18} />
+                  </button>
+                )}
+              </div>
             </div>
             <div className="col-span-2">
               <label className="label">{t('common.product')} *</label>

@@ -288,6 +288,8 @@ const ar: Record<TranslationKeys, string> = {
   'global.out_of_stock': 'نفاد المخزون',
   'global.low_stock': 'مخزون منخفض',
   'global.in_stock': 'في المخزون',
+
+  'stock.off_source': 'تم العثور عليه عبر OpenFoodFacts',
 }
 
 export default ar

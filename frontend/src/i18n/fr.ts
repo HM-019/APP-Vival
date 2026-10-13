@@ -286,6 +286,8 @@ const fr = {
   'global.out_of_stock': 'Rupture',
   'global.low_stock': 'stock bas',
   'global.in_stock': 'en stock',
+
+  'stock.off_source': 'Trouvé via OpenFoodFacts',
 }
 
 export default fr

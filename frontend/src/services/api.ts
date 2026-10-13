@@ -75,4 +75,25 @@ export const dashboardApi = {
   stats: () => api.get('/dashboard/stats'),
 }
 
+// OpenFoodFacts — fallback externe (pas d'auth, fetch natif)
+export const openFoodFactsApi = {
+  lookup: async (barcode: string) => {
+    const fields = 'product_name,product_name_fr,brands,quantity,image_front_url'
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}?fields=${fields}`,
+      { headers: { 'User-Agent': 'Vival-App/1.0' } }
+    )
+    if (!res.ok) throw new Error('OFF unavailable')
+    const json = await res.json()
+    if (json.status !== 1 || !json.product) throw new Error('Not found on OFF')
+    return json.product as {
+      product_name?: string
+      product_name_fr?: string
+      brands?: string
+      quantity?: string
+      image_front_url?: string
+    }
+  },
+}
+
 export default api

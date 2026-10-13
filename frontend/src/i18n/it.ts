@@ -288,6 +288,8 @@ const it: Record<TranslationKeys, string> = {
   'global.out_of_stock': 'Esaurito',
   'global.low_stock': 'scorte basse',
   'global.in_stock': 'in magazzino',
+
+  'stock.off_source': 'Trovato su OpenFoodFacts',
 }
 
 export default it
