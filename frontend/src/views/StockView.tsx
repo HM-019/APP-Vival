@@ -272,14 +272,9 @@ function ReceptionModal({ initialProduct, onClose }: { initialProduct: Product |
       // Fallback OpenFoodFacts
       try {
         const off = await openFoodFactsApi.lookup(bc.trim())
-        const name = (off.product_name_fr || off.product_name || '').trim()
-        if (!name) throw new Error('no name')
         const { data } = await productsApi.create({
           barcode: bc.trim(),
-          name,
-          brand: off.brands ? off.brands.split(',')[0].trim() : undefined,
-          unit: off.quantity,
-          image_url: off.image_front_url,
+          ...off,
         })
         setFromOff(true)
         setProduct(data)
@@ -729,7 +724,7 @@ export default function StockView() {
               <input type="text" {...productForm.register('unit')} className="input" placeholder="1L, 500g..." />
             </div>
           </div>
-          <div className="flex gap-3 pt-2">
+          <div className="sticky bottom-0 bg-bg-card -mx-5 px-5 pt-3 pb-4 border-t border-bg-border flex gap-3">
             <button type="button" onClick={() => { setShowAddProduct(false); setEditProduct(null) }} className="btn-secondary flex-1">{t('common.cancel')}</button>
             <button type="submit" disabled={createProductMut.isPending || updateProductMut.isPending} className="btn-primary flex-1">
               {editProduct ? t('common.save') : t('common.add')}

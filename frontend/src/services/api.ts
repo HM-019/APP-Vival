@@ -75,23 +75,28 @@ export const dashboardApi = {
   stats: () => api.get('/dashboard/stats'),
 }
 
-// OpenFoodFacts — fallback externe (pas d'auth, fetch natif)
+// OpenFoodFacts — fallback externe, même API v0 que le backend (fetch natif, sans auth)
 export const openFoodFactsApi = {
-  lookup: async (barcode: string) => {
-    const fields = 'product_name,product_name_fr,brands,quantity,image_front_url'
+  lookup: async (barcode: string): Promise<{
+    name: string
+    brand?: string
+    unit?: string
+    image_url?: string
+  }> => {
     const res = await fetch(
-      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(barcode)}?fields=${fields}`,
-      { headers: { 'User-Agent': 'Vival-App/1.0' } }
+      `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(barcode)}.json`
     )
     if (!res.ok) throw new Error('OFF unavailable')
     const json = await res.json()
     if (json.status !== 1 || !json.product) throw new Error('Not found on OFF')
-    return json.product as {
-      product_name?: string
-      product_name_fr?: string
-      brands?: string
-      quantity?: string
-      image_front_url?: string
+    const p = json.product
+    const name = (p.product_name_fr || p.product_name || p.generic_name || '').trim()
+    if (!name) throw new Error('No name on OFF')
+    return {
+      name,
+      brand: p.brands ? String(p.brands).split(',')[0].trim() : undefined,
+      unit: p.quantity ?? undefined,
+      image_url: p.image_front_url || p.image_url || undefined,
     }
   },
 }
